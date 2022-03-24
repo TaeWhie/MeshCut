@@ -4,7 +4,7 @@ using UnityEngine;
 
 public class MeshCutter : MonoBehaviour
 {
-    public static GameObject[] Slicer(GameObject _target, Vector3 _sliceNormal, Vector3 _slicePoint)//자를 오브젝트, 단면의 수직벡터, 자르는 한 점
+    public static GameObject[] Slicer(GameObject _target, Vector3 _sliceNormal, Vector3 _slicePoint, Material _ineterial)//자를 오브젝트, 단면의 수직벡터, 자르는 한 점
     {
         Mesh orinMesh = _target.GetComponent<MeshFilter>().sharedMesh;
         Vector3[] orinVerts = orinMesh.vertices;
@@ -212,22 +212,56 @@ public class MeshCutter : MonoBehaviour
             }
         }//for문 끝
 
-     
+        List<Vector3> sortedCreatedVerts;
+        SortVertices(createdVerts, out sortedCreatedVerts);
+
+        List<Vector3> aSideCapVerts, bSideCapVerts;
+        List<Vector3> aSideCapNors, bSideCapNors;
+        List<Vector2> aSideCapUvs, bSideCapUvs;
+        List<int> aSideCapTris, bSideCapTris;
+
+        MakeCap(_sliceNormal, sortedCreatedVerts, out aSideCapVerts, out bSideCapVerts, out aSideCapNors, out bSideCapNors, out aSideCapUvs, out bSideCapUvs, out aSideCapTris, out bSideCapTris);
+        //기존의 List에 Cap의 값들을 붙혀준다.
+        aSideVerts.AddRange(aSideCapVerts);
+        aSideNors.AddRange(aSideCapNors);
+        aSideUvs.AddRange(aSideCapUvs);
+        for(int i=0;i<aSideCapTris.Count;i++)
+        {
+            aSideCapTris[i] = aSideCapTris[i] + aSideTris.Count;//CapTris의 값이 시작값으로 되어있기 때문에,뒤에 기존 Tris의 수 만큼 뒤로 미뤄준다.
+        }
+
+        bSideVerts.AddRange(bSideCapVerts);
+        bSideNors.AddRange(bSideCapNors);
+        bSideUvs.AddRange(bSideCapUvs);
+        for (int i = 0; i < bSideCapTris.Count; i++)
+        {
+            bSideCapTris[i] = bSideCapTris[i] + bSideTris.Count;
+        }
+
         //세팅된 값들을 통해 Aside와 Bside를 그리는 과정
         Mesh aMesh = new Mesh();
         Mesh bMesh = new Mesh();
         aMesh.vertices = aSideVerts.ToArray();
         aMesh.normals = aSideNors.ToArray();
         aMesh.uv = aSideUvs.ToArray();
+        aMesh.subMeshCount = _target.GetComponent<MeshRenderer>().sharedMaterials.Length + 1; //Sub mesh의 개수를 하나 늘린다.
         aMesh.SetTriangles(aSideTris, 0);
+        aMesh.SetTriangles(aSideCapTris, _target.GetComponent<MeshRenderer>().sharedMaterials.Length); //Sub mesh에 단면을 넣는다.
         bMesh.vertices = bSideVerts.ToArray();
         bMesh.normals = bSideNors.ToArray();
         bMesh.uv = bSideUvs.ToArray();
+        bMesh.subMeshCount = _target.GetComponent<MeshRenderer>().sharedMaterials.Length + 1; //Sub mesh의 개수를 하나 늘린다.
         bMesh.SetTriangles(bSideTris, 0);
+        bMesh.SetTriangles(bSideCapTris, _target.GetComponent<MeshRenderer>().sharedMaterials.Length); //Sub mesh에 단면을 넣는다.
 
         GameObject aObject = new GameObject(_target.name + "_A", typeof(MeshFilter), typeof(MeshRenderer));
         GameObject bObject = new GameObject(_target.name + "_B", typeof(MeshFilter), typeof(MeshRenderer));
-        Material[] mats = _target.GetComponent<MeshRenderer>().sharedMaterials;
+        Material[] mats = new Material[_target.GetComponent<MeshRenderer>().sharedMaterials.Length + 1];
+        for (int i = 0; i < _target.GetComponent<MeshRenderer>().sharedMaterials.Length; i++)
+        {
+            mats[i] = _target.GetComponent<MeshRenderer>().sharedMaterials[i];
+        }
+        mats[_target.GetComponent<MeshRenderer>().sharedMaterials.Length] = _ineterial; //마지막에 단면에 쓰일 material을 적용
         aObject.GetComponent<MeshFilter>().sharedMesh = aMesh;
         aObject.GetComponent<MeshRenderer>().sharedMaterials = mats;
         bObject.GetComponent<MeshFilter>().sharedMesh = bMesh;
@@ -244,5 +278,130 @@ public class MeshCutter : MonoBehaviour
         return new GameObject[] { aObject, bObject };//잘린 오브젝트들 반환
 
     }
-    
+    internal static void SortVertices(List<Vector3> _target, out List<Vector3> _result)//새로 생긴 정점들이 겹치는 경우가 있기 때문에 이를 제거하고 순서를 정한다.
+        //두개의 선을 비교하여 끝자락의 어떤 점이라도 겹친다면 그 선분을 잇는 형식으로 이루어진다. 이 과정에서 겹치는 점을 제거된다.
+    {
+        _result = new List<Vector3>();
+        _result.Add(_target[0]);
+        _result.Add(_target[1]);
+        int vertSetCount = _target.Count / 2;
+        for (int i = 0; i < vertSetCount - 1; i++)
+        {
+            Vector3 vert0 = _target[i * 2];
+            Vector3 vert1 = _target[i * 2 + 1];
+            for (int j = i + 1; j < vertSetCount; j++)
+            {
+                Vector3 cVert0 = _target[j * 2];
+                Vector3 cVert1 = _target[j * 2 + 1];
+                if (vert1 == cVert0)
+                {
+                    _result.Add(cVert1);
+
+                    SwapTwoIndexSet<Vector3>(ref _target, i * 2 + 2, i * 2 + 3, j * 2, j * 2 + 1);
+                }
+                else if (vert1 == cVert1)
+                {
+                    _result.Add(cVert0);
+
+                    SwapTwoIndexSet<Vector3>(ref _target, i * 2 + 2, i * 2 + 3, j * 2 + 1, j * 2);
+                }
+            }
+        }
+        if (_result[0] == _result[_result.Count - 1]) _result.RemoveAt(_result.Count - 1);
+    }
+
+    internal static void SwapTwoIndexSet<T>(ref List<T> _target, int _idx00, int _idx01, int _idx10, int _idx11)
+    {
+        T temp0 = _target[_idx00];
+        T temp1 = _target[_idx01];
+        _target[_idx00] = _target[_idx10];
+        _target[_idx01] = _target[_idx11];
+        _target[_idx10] = temp0;
+        _target[_idx11] = temp1;
+    }
+    internal static void MakeCap(Vector3 _faceNormal, List<Vector3> _relatedVerts,
+        out List<Vector3> _aSideVerts, out List<Vector3> _bSideVerts,
+        out List<Vector3> _aSideNors, out List<Vector3> _bSideNors,
+        out List<Vector2> _aSideUvs, out List<Vector2> _bSideUvs,
+        out List<int> _aSideTris, out List<int> _bSideTris)//중앙에 정점을 구한뒤 그 정점과 나머지 정정들을 이어서 폴리곤을 형성한다.
+    {
+        _aSideVerts = new List<Vector3>();
+        _bSideVerts = new List<Vector3>();
+        _aSideNors = new List<Vector3>();
+        _bSideNors = new List<Vector3>();
+        _aSideUvs = new List<Vector2>();
+        _bSideUvs = new List<Vector2>();
+        _aSideTris = new List<int>();
+        _bSideTris = new List<int>();
+        _aSideVerts.AddRange(_relatedVerts);
+        _bSideVerts.AddRange(_relatedVerts);
+        if (_relatedVerts.Count < 2) return;
+
+        //Calculate center of the cap
+        Vector3 center = Vector3.zero;
+        foreach (Vector3 v in _relatedVerts)
+        {
+            center += v;
+        }
+        center /= _relatedVerts.Count;
+        //Add center vert to both side at last
+        _aSideVerts.Add(center);
+        _bSideVerts.Add(center);
+
+        //Calculate cap data
+        //Normal
+        for (int i = 0; i < _aSideVerts.Count; i++)
+        {
+            _aSideNors.Add(_faceNormal);
+            _bSideNors.Add(-_faceNormal);
+        }
+        //Uv
+        //Basis on sliced plane
+        Vector3 forward = Vector3.zero;
+        forward.x = _faceNormal.y;
+        forward.y = -_faceNormal.x;
+        forward.z = _faceNormal.z;
+        Vector3 left = Vector3.Cross(forward, _faceNormal);
+        for (int i = 0; i < _relatedVerts.Count; i++)
+        {
+            Vector3 dir = _relatedVerts[i] - center;
+            Vector2 relatedUV = Vector2.zero;
+            relatedUV.x = 0.5f + Vector3.Dot(dir, left);
+            relatedUV.y = 0.5f + Vector3.Dot(dir, forward);
+            _aSideUvs.Add(relatedUV);
+            _bSideUvs.Add(relatedUV);
+        }
+        _aSideUvs.Add(new Vector2(0.5f, 0.5f));
+        _bSideUvs.Add(new Vector2(0.5f, 0.5f));
+        //Triangle
+        int centerIdx = _aSideVerts.Count - 1;
+        //Check first triangle face where
+        float faceDir = Vector3.Dot(_faceNormal, Vector3.Cross(_relatedVerts[0] - center, _relatedVerts[1] - _relatedVerts[0]));
+        //Store tris
+        for (int i = 0; i < _aSideVerts.Count - 1; i++)
+        {
+            int idx0 = i;
+            int idx1 = (i + 1) % (_aSideVerts.Count - 1);
+            if (faceDir < 0)
+            {
+                _aSideTris.Add(centerIdx);
+                _aSideTris.Add(idx1);
+                _aSideTris.Add(idx0);
+
+                _bSideTris.Add(centerIdx);
+                _bSideTris.Add(idx0);
+                _bSideTris.Add(idx1);
+            }
+            else
+            {
+                _aSideTris.Add(centerIdx);
+                _aSideTris.Add(idx0);
+                _aSideTris.Add(idx1);
+
+                _bSideTris.Add(centerIdx);
+                _bSideTris.Add(idx1);
+                _bSideTris.Add(idx0);
+            }
+        }
+    }
 }
